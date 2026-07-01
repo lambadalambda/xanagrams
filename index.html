@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Zanagrams</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script type="module" src="./src/app.js"></script>
+  </head>
+  <body>
+    <main id="app" class="app">
+      <header class="topbar" aria-label="Game controls">
+        <button id="open-help" class="icon-button" type="button" aria-label="How to play">?</button>
+        <p class="brand">Zanagrams</p>
+        <button id="restart" class="text-button" type="button">Restart</button>
+      </header>
+
+      <section class="intro" aria-live="polite">
+        <h1 id="heading">Welcome to Zanagrams</h1>
+        <p id="prompt">Drag <strong>PLAY</strong> to begin</p>
+      </section>
+
+      <button id="current-word" class="current-word" type="button" disabled>Select letters</button>
+      <p id="message" class="message" data-kind="idle" aria-live="polite"></p>
+
+      <section id="board" class="board" aria-label="Letter board">
+        <svg id="board-lines" class="board-lines" viewBox="0 0 100 100" aria-hidden="true"></svg>
+        <div id="board-nodes" class="board-nodes"></div>
+      </section>
+
+      <ul id="word-list" class="word-list" aria-label="Hidden words"></ul>
+
+      <footer class="actions">
+        <button id="skip-tutorial" class="quiet-button" type="button">Skip tutorial</button>
+        <button id="random-puzzle" class="quiet-button" type="button">Random puzzle</button>
+        <button id="next-puzzle" class="primary-button" type="button" hidden>Next puzzle</button>
+      </footer>
+    </main>
+
+    <dialog id="help-dialog" class="help-dialog">
+      <div class="help-card">
+        <button id="close-help" class="close-button" type="button" aria-label="Close help">x</button>
+        <h2>How to play</h2>
+
+        <ol class="help-list blue-steps">
+          <li><span>1</span>Drag across the letters to find the hidden words.</li>
+          <li><span>2</span>You can drag in any direction, but only along the given paths.</li>
+          <li><span>3</span>Letters and paths disappear when they are no longer needed.</li>
+          <li><span>4</span>Words can be found in any order and the puzzle stays solvable.</li>
+        </ol>
+
+        <h3>Controls</h3>
+        <ol class="help-list green-steps">
+          <li><span>1</span>Drag across letters and release to submit a word.</li>
+          <li><span>2</span>Or tap letters one by one, then tap the word above to submit.</li>
+        </ol>
+      </div>
+    </dialog>
+  </body>
+</html>
