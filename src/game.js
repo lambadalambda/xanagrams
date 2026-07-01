@@ -78,14 +78,14 @@ export const starterPuzzle = generatePuzzle({
   title: 'Zanagrams #1',
   rankedWords: COMMON_WORDS,
   seed: 'board',
-  targetWordCount: 5,
+  targetWordCount: 6,
   minRequiredWords: 8,
   maxRequiredWords: 15,
   targetEdges: 20,
   maxEdges: 23,
   requiredMaxRank: 1500,
   bonusMaxRank: 25000,
-  attempts: 80,
+  attempts: 120,
   seedBoards: [],
 });
 
@@ -95,14 +95,14 @@ export const createRandomPuzzle = ({ seed = `random-${Date.now()}`, number = 1 }
     title: `Zanagrams #${number}`,
     rankedWords: COMMON_WORDS,
     seed,
-    targetWordCount: 5,
+    targetWordCount: 6,
     minRequiredWords: 8,
     maxRequiredWords: 15,
     targetEdges: 20,
     maxEdges: 23,
     requiredMaxRank: 1500,
     bonusMaxRank: 25000,
-    attempts: 80,
+    attempts: 120,
     seedBoards: [],
   });
 

@@ -5,6 +5,116 @@ const commonHereFamily = new Set(['HERE', 'HERES', 'THEIR', 'THERE', 'THERES', '
 
 const normalizeWord = (word) => word.toUpperCase().replace(/[^A-Z]/g, '');
 
+const wordText = (word) => (typeof word === 'string' ? normalizeWord(word) : normalizeWord(word.text));
+
+const stemWord = (word) => {
+  const text = wordText(word);
+  const suffixes = [
+    ['ING', 3],
+    ['IES', 3],
+    ['LY', 4],
+    ['ED', 4],
+    ['ES', 4],
+    ['S', 4],
+  ];
+  const suffix = suffixes.find(([ending, minStemLength]) =>
+    text.endsWith(ending) && text.length - ending.length >= minStemLength,
+  );
+
+  if (!suffix) {
+    return text;
+  }
+
+  const [ending] = suffix;
+  return ending === 'IES' ? `${text.slice(0, -3)}Y` : text.slice(0, -ending.length);
+};
+
+const stemVariants = (word) => {
+  const text = wordText(word);
+  const stem = stemWord(text);
+  const variants = new Set([stem]);
+
+  if ((text.endsWith('ING') || text.endsWith('ED')) && stem.length >= 3) {
+    variants.add(`${stem}E`);
+  }
+
+  return variants;
+};
+
+const bigrams = (word) => new Set(Array.from({ length: Math.max(0, word.length - 1) }, (_, index) => word.slice(index, index + 2)));
+
+const jaccard = (firstSet, secondSet) => {
+  const intersection = [...firstSet].filter((item) => secondSet.has(item)).length;
+  const union = new Set([...firstSet, ...secondSet]).size;
+  return union === 0 ? 0 : intersection / union;
+};
+
+const multisetSimilarity = (firstWord, secondWord) => {
+  const counts = new Map();
+
+  for (const letter of firstWord) {
+    counts.set(letter, (counts.get(letter) ?? 0) + 1);
+  }
+
+  let shared = 0;
+
+  for (const letter of secondWord) {
+    const count = counts.get(letter) ?? 0;
+
+    if (count > 0) {
+      shared += 1;
+      counts.set(letter, count - 1);
+    }
+  }
+
+  return shared / Math.max(firstWord.length, secondWord.length);
+};
+
+const wordPairSimilarity = (firstWord, secondWord) => {
+  const first = wordText(firstWord);
+  const second = wordText(secondWord);
+  const [shorter, longer] = first.length <= second.length ? [first, second] : [second, first];
+  const firstStems = stemVariants(first);
+  const secondStems = stemVariants(second);
+  const hasSharedStem = [...firstStems].some((stem) => stem.length >= 4 && secondStems.has(stem));
+  const bigramScore = jaccard(bigrams(first), bigrams(second));
+  const letterScore = multisetSimilarity(first, second);
+
+  if (longer.includes(shorter) && shorter.length >= 4) {
+    return 2.2;
+  }
+
+  if (hasSharedStem) {
+    return 1.8;
+  }
+
+  if (letterScore >= 0.9 && first.length >= 5 && second.length >= 5) {
+    return 1.5;
+  }
+
+  if (bigramScore >= 0.6) {
+    return 1.2;
+  }
+
+  if (bigramScore >= 0.45 && letterScore >= 0.7) {
+    return 0.7;
+  }
+
+  return 0;
+};
+
+export const getWordSimilarityPenalty = (words) => {
+  let penalty = 0;
+
+  for (let firstIndex = 0; firstIndex < words.length; firstIndex += 1) {
+    for (let secondIndex = firstIndex + 1; secondIndex < words.length; secondIndex += 1) {
+      penalty += wordPairSimilarity(words[firstIndex], words[secondIndex]);
+    }
+  }
+
+  return penalty;
+};
+
 const edgeKey = (from, to) => [from, to].sort().join('|');
 
 const hashSeed = (seed) => {
@@ -300,17 +410,23 @@ const scorePuzzle = (words, boardLetters, { minRequiredWords, maxRequiredWords, 
   const uniqueLetterCount = new Set(boardLetters).size;
   const hereFamilyCount = words.filter((word) => commonHereFamily.has(word.text)).length;
   const thClusterCount = words.filter((word) => /TH|HER|ERE/.test(word.text)).length;
+  const similarityPenalty = getWordSimilarityPenalty(words) * 900;
   const wordCount = words.length;
   const idealWordCount = (minRequiredWords + maxRequiredWords) / 2;
   const wordRangePenalty =
     wordCount < minRequiredWords
-      ? (minRequiredWords - wordCount) * 1400
+      ? (minRequiredWords - wordCount) * 3500
       : wordCount > maxRequiredWords
         ? (wordCount - maxRequiredWords) * 1800
         : Math.abs(wordCount - idealWordCount) * 90;
+  const minEdges = Math.max(0, targetEdges - 2);
   const edgePenalty =
-    edges.size > maxEdges ? (edges.size - maxEdges) * 650 : Math.abs(edges.size - targetEdges) * 80;
-  const nodeCoveragePenalty = nodes.size < gridSize * gridSize ? (gridSize * gridSize - nodes.size) * 3000 : 0;
+    edges.size > maxEdges
+      ? (edges.size - maxEdges) * 650
+      : edges.size < minEdges
+        ? (minEdges - edges.size) * 2500
+        : Math.abs(edges.size - targetEdges) * 80;
+  const nodeCoveragePenalty = nodes.size < gridSize * gridSize ? (gridSize * gridSize - nodes.size) * 5000 : 0;
   const uniqueLetterPenalty = uniqueLetterCount < 9 ? (9 - uniqueLetterCount) * 1400 : 0;
   const commonLetterPenalty = [...'ETHRS'].reduce(
     (penalty, letter) => penalty + Math.max(0, boardLetters.filter((candidate) => candidate === letter).length - 2) * 220,
@@ -331,7 +447,8 @@ const scorePuzzle = (words, boardLetters, { minRequiredWords, maxRequiredWords, 
     uniqueLetterPenalty -
     commonLetterPenalty -
     hereFamilyPenalty -
-    thClusterPenalty
+    thClusterPenalty -
+    similarityPenalty
   );
 };
 

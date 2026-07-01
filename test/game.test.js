@@ -17,7 +17,7 @@ import {
   submitPath,
   tutorialPuzzle,
 } from '../src/game.js';
-import { filterRankedWords, generatePuzzle } from '../src/generator.js';
+import { filterRankedWords, generatePuzzle, getWordSimilarityPenalty } from '../src/generator.js';
 
 const hasEdge = (edges, firstNodeId, secondNodeId) =>
   edges.some(
@@ -231,7 +231,7 @@ describe('zanagrams game engine', () => {
   });
 
   it('creates random puzzles within playable count and density caps', () => {
-    for (const seed of ['random-test-a', 'random-test-b', 'random-test-c']) {
+    for (const seed of ['random-test-a', 'random-test-b', 'random-test-c', 'similarity-a']) {
       const puzzle = createRandomPuzzle({ seed, number: 99 });
       const requiredWords = getRequiredWords(puzzle);
       const bonusWords = getBonusWords(puzzle);
@@ -255,6 +255,23 @@ describe('zanagrams game engine', () => {
 
       assert.ok(familyCount <= 2, `${seed} has ${familyCount} here/there-family words`);
       assert.ok(uniqueLetterCount >= 9, `${seed} only has ${uniqueLetterCount} unique letters`);
+    }
+  });
+
+  it('penalizes near-duplicate required word sets', () => {
+    const badSet = ['BEING', 'LEFT', 'EARLY', 'NEAR', 'LEAD', 'LEADING', 'NEARLY', 'BEGIN', 'LIVE', 'LIVING'];
+    const variedSet = ['BEING', 'LEFT', 'CROWN', 'MUSIC', 'PLANT', 'VIDEO', 'SUGAR', 'BRICK'];
+
+    assert.ok(getWordSimilarityPenalty(badSet) >= 7);
+    assert.ok(getWordSimilarityPenalty(variedSet) <= 1.5);
+  });
+
+  it('keeps generated required words below the near-duplicate threshold', () => {
+    for (const seed of ['random-test-b', 'similarity-a', 'similarity-b', 'similarity-c']) {
+      const puzzle = createRandomPuzzle({ seed, number: 99 });
+      const similarityPenalty = getWordSimilarityPenalty(getRequiredWords(puzzle));
+
+      assert.ok(similarityPenalty <= 4.5, `${seed} similarity penalty is ${similarityPenalty}`);
     }
   });
 
