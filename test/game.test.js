@@ -1,23 +1,29 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { COMMON_WORDS } from '../src/common-words.js';
+import { COMMON_WORDS, EXCLUDED_WORDS } from '../src/common-words.js';
 import {
   areAdjacent,
   createGameState,
   createRandomPuzzle,
+  createStarterPuzzle,
   getActiveEdges,
   getActiveNodeIds,
   getAllEdges,
   getSelectionWord,
   getBonusWords,
   getRequiredWords,
+  getWordList,
   isValidPath,
-  starterPuzzle,
   submitPath,
   tutorialPuzzle,
 } from '../src/game.js';
 import { filterRankedWords, generatePuzzle, getWordSimilarityPenalty } from '../src/generator.js';
+import { dailyNumber, dailySeed, formatDuration, hintsAvailable, localDateString, previousDateString } from '../src/features.js';
+import { SETTING_DEFINITIONS, defaultSettings, loadSettings, saveSettings } from '../src/settings.js';
+import { loadProgress, recordCompletion, saveProgress } from '../src/storage.js';
+
+const starterPuzzle = createStarterPuzzle();
 
 const hasEdge = (edges, firstNodeId, secondNodeId) =>
   edges.some(
@@ -186,7 +192,7 @@ describe('zanagrams game engine', () => {
     assert.equal(new Set(starterPuzzle.nodes.map((node) => node.y)).size, 4);
     assert.ok(getRequiredWords(starterPuzzle).length >= 8);
     assert.ok(getRequiredWords(starterPuzzle).length <= 15);
-    assert.ok(getBonusWords(starterPuzzle).length <= 30);
+    assert.ok(getBonusWords(starterPuzzle).length <= 40);
     assert.ok(getBonusWords(starterPuzzle).length > 0);
     assert.ok(edges.length >= 18);
     assert.ok(edges.length <= 23);
@@ -241,7 +247,7 @@ describe('zanagrams game engine', () => {
       assert.equal(getActiveNodeIds(puzzle, []).size, 16);
       assert.ok(requiredWords.length >= 8, `${seed} required word count too low`);
       assert.ok(requiredWords.length <= 15, `${seed} required word count too high`);
-      assert.ok(bonusWords.length <= 30, `${seed} bonus word count too high`);
+      assert.ok(bonusWords.length <= 40, `${seed} bonus word count too high`);
       assert.ok(edges.length >= 18, `${seed} edge count too low`);
       assert.ok(edges.length <= 23, `${seed} edge count too high`);
     }
@@ -316,7 +322,7 @@ describe('zanagrams game engine', () => {
     const requiredLengths = new Set(getRequiredWords(starterPuzzle).map((word) => word.text.length));
 
     assert.ok(getRequiredWords(starterPuzzle).length <= 15);
-    assert.ok(getBonusWords(starterPuzzle).length <= 30);
+    assert.ok(getBonusWords(starterPuzzle).length <= 40);
     assert.ok(requiredLengths.size >= 2);
   });
 
@@ -329,11 +335,174 @@ describe('zanagrams game engine', () => {
 
   it('can complete the playable puzzle from its declared word paths', () => {
     const state = getRequiredWords(starterPuzzle).reduce(
-      (currentState, word) => submitPath(currentState, word.path),
+      (currentState, word) => submitPath(currentState, word.path, starterPuzzle),
       createGameState(starterPuzzle),
     );
 
     assert.equal(state.complete, true);
     assert.equal(getActiveNodeIds(starterPuzzle, state.foundWordIds).size, 0);
+  });
+});
+
+describe('curated word list', () => {
+  it('filters excluded words out of the curated list', () => {
+    const curated = new Set(getWordList(true));
+
+    assert.ok(getWordList(false).length > curated.size);
+
+    for (const junk of ['tina', 'ment', 'arent', 'tits']) {
+      assert.ok(COMMON_WORDS.includes(junk), `${junk} should be in the raw list`);
+      assert.ok(EXCLUDED_WORDS.includes(junk), `${junk} should be excluded`);
+      assert.equal(curated.has(junk), false);
+    }
+
+    assert.ok(curated.has('time'));
+    assert.ok(curated.has('names'));
+  });
+
+  it('keeps curated words out of generated puzzles', () => {
+    const excluded = new Set(EXCLUDED_WORDS.map((word) => word.toUpperCase()));
+    const puzzle = createRandomPuzzle({ seed: 'curated-test' });
+
+    for (const word of [...getRequiredWords(puzzle), ...getBonusWords(puzzle)]) {
+      assert.equal(excluded.has(word.text), false, `${word.text} should not appear in curated puzzles`);
+    }
+  });
+});
+
+describe('distinct required words', () => {
+  const rankedWords = ['names', 'name'];
+  const seedBoards = ['NAMEXQJSKVWZBPFG'];
+
+  it('demotes closure near-duplicates to bonus words when enabled', () => {
+    const puzzle = generatePuzzle({ rankedWords, targetWordCount: 1, attempts: 0, seedBoards, distinctRequired: true });
+
+    assert.deepEqual(getRequiredWords(puzzle).map((word) => word.text), ['NAMES']);
+    assert.ok(getBonusWords(puzzle).map((word) => word.text).includes('NAME'));
+  });
+
+  it('keeps near-duplicates required when disabled', () => {
+    const puzzle = generatePuzzle({ rankedWords, targetWordCount: 1, attempts: 0, seedBoards });
+
+    assert.deepEqual(getRequiredWords(puzzle).map((word) => word.text).sort(), ['NAME', 'NAMES']);
+  });
+
+  it('keeps generated required lists free of substrings and inflections', () => {
+    for (const seed of ['eval-1', 'eval-2', 'similarity-a']) {
+      const words = getRequiredWords(createRandomPuzzle({ seed })).map((word) => word.text);
+
+      for (const first of words) {
+        for (const second of words) {
+          if (first === second) {
+            continue;
+          }
+
+          assert.equal(
+            first.length >= 4 && second.includes(first),
+            false,
+            `${seed}: ${first} is a substring of required ${second}`,
+          );
+        }
+      }
+    }
+  });
+});
+
+describe('daily puzzles and helpers', () => {
+  it('numbers daily puzzles from the epoch', () => {
+    assert.equal(dailyNumber('2026-07-01'), 1);
+    assert.equal(dailyNumber('2026-07-02'), 2);
+    assert.equal(dailyNumber('2026-08-01'), 32);
+    assert.equal(dailySeed('2026-07-02'), 'daily-2026-07-02');
+  });
+
+  it('formats local dates and durations', () => {
+    assert.equal(localDateString(new Date(2026, 6, 2, 23, 59)), '2026-07-02');
+    assert.equal(previousDateString('2026-07-01'), '2026-06-30');
+    assert.equal(formatDuration(0), '0:00');
+    assert.equal(formatDuration(61_000), '1:01');
+    assert.equal(formatDuration(600_500), '10:00');
+  });
+
+  it('grants one hint plus one per two bonus words', () => {
+    assert.equal(hintsAvailable({ bonusWordCount: 0, hintsUsed: 0 }), 1);
+    assert.equal(hintsAvailable({ bonusWordCount: 0, hintsUsed: 1 }), 0);
+    assert.equal(hintsAvailable({ bonusWordCount: 1, hintsUsed: 1 }), 0);
+    assert.equal(hintsAvailable({ bonusWordCount: 4, hintsUsed: 1 }), 2);
+  });
+});
+
+const makeFakeStorage = () => {
+  const map = new Map();
+
+  return {
+    getItem: (key) => map.get(key) ?? null,
+    setItem: (key, value) => map.set(key, String(value)),
+    removeItem: (key) => map.delete(key),
+  };
+};
+
+describe('settings', () => {
+  it('defaults every setting to its declared default', () => {
+    const settings = defaultSettings();
+
+    for (const definition of SETTING_DEFINITIONS) {
+      assert.equal(settings[definition.key], definition.default);
+    }
+  });
+
+  it('round-trips saved settings and ignores junk values', () => {
+    const storage = makeFakeStorage();
+    saveSettings(storage, { ...defaultSettings(), timer: false, bogus: true });
+    const loaded = loadSettings(storage);
+
+    assert.equal(loaded.timer, false);
+    assert.equal(loaded.cleanWords, true);
+    assert.equal('bogus' in loaded, false);
+
+    storage.setItem('zanagrams-settings', 'not json');
+    assert.deepEqual(loadSettings(storage), defaultSettings());
+  });
+});
+
+describe('progress and stats storage', () => {
+  it('round-trips progress and rejects malformed payloads', () => {
+    const storage = makeFakeStorage();
+    const progress = {
+      version: 1,
+      mode: 'daily',
+      spec: { id: 'daily-2026-07-02', title: 'Zanagrams #2', seed: 'daily-2026-07-02', cleanWords: true, distinctWords: true },
+      foundWordIds: ['time'],
+      bonusWordIds: [],
+      hintsUsed: 1,
+      elapsedMs: 45_000,
+      savedAt: 0,
+    };
+
+    saveProgress(storage, progress);
+    assert.deepEqual(loadProgress(storage), progress);
+
+    storage.setItem('zanagrams-progress', JSON.stringify({ mode: 'daily' }));
+    assert.equal(loadProgress(storage), null);
+  });
+
+  it('records best times and daily streaks', () => {
+    const stats = { tutorialDone: true, bestTimes: {}, dailyStreak: 0, lastDailyDate: null };
+    const first = recordCompletion(stats, { mode: 'daily', elapsedMs: 90_000, dateString: '2026-07-01' });
+
+    assert.equal(first.isNewBest, true);
+    assert.equal(first.stats.bestTimes.daily, 90_000);
+    assert.equal(first.stats.dailyStreak, 1);
+
+    const second = recordCompletion(first.stats, { mode: 'daily', elapsedMs: 120_000, dateString: '2026-07-02' });
+
+    assert.equal(second.isNewBest, false);
+    assert.equal(second.stats.bestTimes.daily, 90_000);
+    assert.equal(second.stats.dailyStreak, 2);
+
+    const afterGap = recordCompletion(second.stats, { mode: 'daily', elapsedMs: 60_000, dateString: '2026-07-05' });
+
+    assert.equal(afterGap.stats.dailyStreak, 1);
+    assert.equal(afterGap.stats.bestTimes.daily, 60_000);
   });
 });

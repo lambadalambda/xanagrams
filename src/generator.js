@@ -244,10 +244,40 @@ const makeAdjacency = (edges) => {
   return adjacency;
 };
 
-const findPathsForWordOnGraph = (nodes, edges, word, maxPaths = 4) => {
+const makeWordGraph = (nodes, edges) => ({
+  adjacency: makeAdjacency(edges),
+  letterByNode: new Map(nodes.map((node) => [node.id, node.letter])),
+});
+
+const countLetters = (letters) => {
+  const counts = new Map();
+
+  for (const letter of letters) {
+    counts.set(letter, (counts.get(letter) ?? 0) + 1);
+  }
+
+  return counts;
+};
+
+const canSpellFromCounts = (word, counts) => {
+  const needed = new Map();
+
+  for (const letter of word) {
+    const nextCount = (needed.get(letter) ?? 0) + 1;
+
+    if (nextCount > (counts.get(letter) ?? 0)) {
+      return false;
+    }
+
+    needed.set(letter, nextCount);
+  }
+
+  return true;
+};
+
+const findPathsForWordOnGraph = (graph, word, maxPaths = 4) => {
   const paths = [];
   const target = normalizeWord(word);
-  const adjacency = makeAdjacency(edges);
 
   const walk = (nodeId, path) => {
     if (paths.length >= maxPaths) {
@@ -259,10 +289,8 @@ const findPathsForWordOnGraph = (nodes, edges, word, maxPaths = 4) => {
       return;
     }
 
-    for (const neighborId of adjacency.get(nodeId) ?? []) {
-      const neighbor = nodes.find((node) => node.id === neighborId);
-
-      if (!neighbor || path.includes(neighborId) || neighbor.letter !== target[path.length]) {
+    for (const neighborId of graph.adjacency.get(nodeId) ?? []) {
+      if (path.includes(neighborId) || graph.letterByNode.get(neighborId) !== target[path.length]) {
         continue;
       }
 
@@ -270,36 +298,62 @@ const findPathsForWordOnGraph = (nodes, edges, word, maxPaths = 4) => {
     }
   };
 
-  for (const node of nodes) {
-    if (node.letter === target[0]) {
-      walk(node.id, [node.id]);
+  for (const [nodeId, letter] of graph.letterByNode) {
+    if (letter === target[0]) {
+      walk(nodeId, [nodeId]);
     }
   }
 
   return paths;
 };
 
-const closeWordsOverGraph = (nodes, selectedWords, rankedWords) => {
-  const edges = [...new Map(selectedWords.flatMap((word) => pathEdges(word.path)).map((key) => [key, key])).keys()].map((key) =>
-    key.split('|'),
-  );
+const closeWordsOverGraph = (nodes, selectedWords, rankedWords, { demoteNearDuplicates = false } = {}) => {
+  const edges = [...new Set(selectedWords.flatMap((word) => pathEdges(word.path)))].map((key) => key.split('|'));
+  const graph = makeWordGraph(nodes, edges);
+  const boardCounts = countLetters(nodes.map((node) => node.letter));
   const selectedByText = new Map(selectedWords.map((word) => [word.text, word]));
 
-  return rankedWords.flatMap((word) => {
+  const entries = rankedWords.flatMap((word) => {
     const selectedWord = selectedByText.get(word.text);
 
-    if (selectedWord) {
-      return [{ id: word.text.toLowerCase(), text: word.text, path: selectedWord.path, rank: word.rank }];
+    if (!selectedWord && !canSpellFromCounts(word.text, boardCounts)) {
+      return [];
     }
 
-    const [path] = findPathsForWordOnGraph(nodes, edges, word.text);
+    const path = selectedWord?.path ?? findPathsForWordOnGraph(graph, word.text)[0];
 
     if (!path) {
       return [];
     }
 
-    return [{ id: word.text.toLowerCase(), text: word.text, path, rank: word.rank }];
+    return [{ entry: { id: word.text.toLowerCase(), text: word.text, path, rank: word.rank }, selected: Boolean(selectedWord) }];
   });
+
+  if (!demoteNearDuplicates) {
+    return { words: entries.map((item) => item.entry), demoted: [] };
+  }
+
+  // Selected words placed the board's edges, so they can never be demoted; incidental
+  // closure words that are inflections, substrings, near-anagrams, or heavy bigram overlaps
+  // of an accepted word become bonus words.
+  const comparisonPool = entries.filter((item) => item.selected).map((item) => item.entry);
+  const words = [];
+  const demoted = [];
+
+  for (const item of entries) {
+    if (!item.selected && comparisonPool.some((existing) => wordPairSimilarity(existing.text, item.entry.text) >= 1.2)) {
+      demoted.push(item.entry);
+      continue;
+    }
+
+    words.push(item.entry);
+
+    if (!item.selected) {
+      comparisonPool.push(item.entry);
+    }
+  }
+
+  return { words, demoted };
 };
 
 const bestPathForCandidate = (candidate, usedNodes, usedEdges) =>
@@ -570,6 +624,7 @@ export const generatePuzzle = ({
   bonusMaxRank = maxRank,
   attempts = 80,
   seedBoards = ['STARELIDOPNECARS'],
+  distinctRequired = false,
 } = {}) => {
   const random = createRandom(seed);
   const requiredWords = filterRankedWords(rankedWords, { minLength, maxRank: requiredMaxRank });
@@ -581,14 +636,21 @@ export const generatePuzzle = ({
   const best = boards.reduce(
     (bestPuzzle, letters) => {
       const boardLetters = [...letters];
+      const boardCounts = countLetters(boardLetters);
       const candidates = requiredWords.flatMap((word) => {
+        if (!canSpellFromCounts(word.text, boardCounts)) {
+          return [];
+        }
+
         const paths = findPathsForWord(boardLetters, word.text);
         return paths.length > 0 ? [{ ...word, paths }] : [];
       });
       const selectedWords = selectWords(candidates, { targetWordCount });
       const nodes = createNodes(boardLetters);
-      const closedRequiredWords = closeWordsOverGraph(nodes, selectedWords, requiredWords);
-      const score = scorePuzzle(closedRequiredWords, boardLetters, {
+      const closed = closeWordsOverGraph(nodes, selectedWords, requiredWords, {
+        demoteNearDuplicates: distinctRequired,
+      });
+      const score = scorePuzzle(closed.words, boardLetters, {
         minRequiredWords,
         maxRequiredWords,
         targetEdges,
@@ -596,7 +658,7 @@ export const generatePuzzle = ({
       });
 
       if (!bestPuzzle || score > bestPuzzle.score) {
-        return { letters, selectedWords, requiredWords: closedRequiredWords, score };
+        return { letters, selectedWords, requiredWords: closed.words, demotedWords: closed.demoted, score };
       }
 
       return bestPuzzle;
@@ -609,7 +671,10 @@ export const generatePuzzle = ({
   }
 
   const nodes = createNodes([...best.letters]);
-  const bonusWords = closeWordsOverGraph(nodes, best.selectedWords, bonusCandidates);
+  const bonusWords = [
+    ...best.demotedWords,
+    ...closeWordsOverGraph(nodes, best.selectedWords, bonusCandidates).words,
+  ];
 
   return {
     id,

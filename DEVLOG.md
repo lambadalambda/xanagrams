@@ -1,5 +1,20 @@
 # DEVLOG
 
+## 2026-07-02
+
+- Added a settings dialog (gear icon) with eight persisted feature toggles so every new behavior can be turned on or off: curated dictionary, distinct required words, daily puzzle, timer & best times, save progress, hints, definitions, and enhanced feedback. All default on.
+- Curated dictionary: vendored the public-domain ENABLE word list (`data/enable1.txt`); `npm run build:words` now also emits `EXCLUDED_WORDS` (4,408 entries) covering proper nouns (TINA, NERO), tokenizer artifacts (MENT), contraction fragments (ARENT), informalisms (SHOULDA), and profanity. The generator filters against it when the toggle is on.
+- Distinct required words: incidental closure words that are inflections, substrings, near-anagrams, or heavy bigram overlaps of an already-required word (pair similarity >= 1.2) are demoted to bonus words instead of blocking completion (e.g. SOMEONE required, SOME bonus).
+- Generator performance: per-board word graph (adjacency + letter maps built once instead of per word) and a letter-multiset prefilter before path search. Random generation dropped from ~380 ms to ~120 ms for 120 attempts.
+- Moved puzzle generation off the main thread into a module Web Worker with a synchronous fallback, and prefetch the likely next puzzles in the background, so the starter/random/daily buttons feel instant. `game.js` no longer generates the starter puzzle at module load (use `createStarterPuzzle()`).
+- Daily puzzle: date-seeded `Zanagrams #N` (epoch 2026-07-01) identical for everyone on a given day, with a completion checkmark and a day-streak counter.
+- Timer & stats: per-mode best times in localStorage, timer pauses while the tab is hidden, completion message shows solve time, best, streak, and bonus-word summary.
+- Save progress: in-progress puzzles (seed + found words + hints + elapsed time) are restored after reload by regenerating from the saved seed.
+- Hints: one per puzzle plus one per two bonus words found; a hint briefly pulses one remaining word's path in green.
+- Definitions: found word chips are tappable and look up meanings via dictionaryapi.dev.
+- Enhanced feedback: found words flash on the board before their letters vanish, wrong guesses shake the word pill, completion pops the heading.
+- Fixed: "Next puzzle" after finishing a random/daily puzzle now starts a fresh puzzle instead of returning to the tutorial, and a failed generation no longer leaves the random button stuck on "Generating...".
+
 ## 2026-07-01
 
 - Implemented Zanagrams as a static browser game in an empty project.

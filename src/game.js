@@ -1,5 +1,20 @@
-import { COMMON_WORDS } from './common-words.js';
+import { COMMON_WORDS, EXCLUDED_WORDS } from './common-words.js';
 import { generatePuzzle } from './generator.js';
+
+let curatedWordsCache = null;
+
+export const getWordList = (cleanWords = true) => {
+  if (!cleanWords) {
+    return COMMON_WORDS;
+  }
+
+  if (!curatedWordsCache) {
+    const excluded = new Set(EXCLUDED_WORDS);
+    curatedWordsCache = COMMON_WORDS.filter((word) => !excluded.has(word));
+  }
+
+  return curatedWordsCache;
+};
 
 const edgeKey = (from, to) => [from, to].sort().join('|');
 
@@ -73,11 +88,7 @@ export const tutorialPuzzle = {
   ],
 };
 
-export const starterPuzzle = generatePuzzle({
-  id: 'starter',
-  title: 'Zanagrams #1',
-  rankedWords: COMMON_WORDS,
-  seed: 'board',
+const basePuzzleOptions = {
   targetWordCount: 6,
   minRequiredWords: 8,
   maxRequiredWords: 15,
@@ -87,26 +98,28 @@ export const starterPuzzle = generatePuzzle({
   bonusMaxRank: 25000,
   attempts: 120,
   seedBoards: [],
-});
+};
 
-export const createRandomPuzzle = ({ seed = `random-${Date.now()}`, number = 1 } = {}) =>
+export const createSeededPuzzle = ({ id, title, seed, cleanWords = true, distinctWords = true }) =>
   generatePuzzle({
-    id: `random-${seed}`,
-    title: `Zanagrams #${number}`,
-    rankedWords: COMMON_WORDS,
+    id,
+    title,
+    rankedWords: getWordList(cleanWords),
     seed,
-    targetWordCount: 6,
-    minRequiredWords: 8,
-    maxRequiredWords: 15,
-    targetEdges: 20,
-    maxEdges: 23,
-    requiredMaxRank: 1500,
-    bonusMaxRank: 25000,
-    attempts: 120,
-    seedBoards: [],
+    distinctRequired: distinctWords,
+    ...basePuzzleOptions,
   });
 
-export const puzzles = [tutorialPuzzle, starterPuzzle];
+export const createStarterPuzzle = ({ cleanWords = true, distinctWords = true } = {}) =>
+  createSeededPuzzle({ id: 'starter', title: 'Starter puzzle', seed: 'board', cleanWords, distinctWords });
+
+export const createRandomPuzzle = ({
+  seed = `random-${Date.now()}`,
+  number = 1,
+  title = `Zanagrams #${number}`,
+  cleanWords = true,
+  distinctWords = true,
+} = {}) => createSeededPuzzle({ id: `random-${seed}`, title, seed, cleanWords, distinctWords });
 
 export const normalizeWord = (word) => word.toUpperCase().replace(/[^A-Z]/g, '');
 
@@ -224,7 +237,7 @@ export const findMatchingWord = (puzzle, foundWordIds, path, bonusWordIds = []) 
 };
 
 export const submitPath = (state, path, puzzleOverride = null) => {
-  const puzzle = puzzleOverride ?? puzzles.find((candidate) => candidate.id === state.puzzleId) ?? tutorialPuzzle;
+  const puzzle = puzzleOverride ?? tutorialPuzzle;
   const selectedWord = getSelectionWord(puzzle, path);
   const alreadyFoundWord = findAlreadyFoundWord(puzzle, state, path);
 
